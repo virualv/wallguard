@@ -1,5 +1,5 @@
 # WallGuard
-An automatic add client ip to server firewall whitelist tool
+An automatic update client ip to server firewall whitelist tool
 
 ## Dependence
  - iptables
