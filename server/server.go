@@ -183,7 +183,7 @@ func handleFirewall(ipAddr string, uuid string, portRange string) {
 	var oldIpAddr string
 	oldIpAddr = readOldIpInfo(uuid)
 	if oldIpAddr == ipAddr {
-		log.Printf("\033[1;36;40mWallGuard [server]: user{%v} 's ip(%v) no change\033[0m", uuid, ipAddr)
+		log.Printf("\033[1;36;40mWallGuard [server]: user: %v ip: %v no change\033[0m", uuid, ipAddr)
 		return
 	} else {
 		cacheIpInfo(ipAddr, uuid)
