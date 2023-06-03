@@ -51,7 +51,7 @@ func main() {
 	}
 	config = tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true}
 	serverURI = *serverIp + ":" + *serverPort
-	log.Printf("\033[1;31;40m%v\033[0m\n", *uuid)
+	log.Printf("\033[1;34;40mWallGuard [client]: uuid: %v\033[0m\n", *uuid)
 	for {
 		log.Println("WallGuard [client]: Query my public ip address")
 		ipAddr := queryLocalIp(client)
@@ -60,7 +60,7 @@ func main() {
 			os.Exit(-1)
 		}
 		sdata := *uuid + "," + ipAddr
-		log.Printf("\033[1;31;40mWallGuard [client]: my current public ip addr is %v\033[0m\n", ipAddr)
+		log.Printf("\033[1;34;40mWallGuard [client]: my current public ip addr is %v\033[0m\n", ipAddr)
 		sendData(config, serverURI, sdata)
 		log.Printf("\033[1;34;40mWallGuard [client]: time sleep %vs\033[0m\n", *interval)
 		time.Sleep(sleepInterval * time.Second)
