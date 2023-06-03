@@ -7,6 +7,7 @@ import (
 	// "crypto/x509"
 	"strings"
 	"flag"
+	"math/rand"
 	"time"
 	"log"
 	"io"
@@ -19,6 +20,7 @@ var certPath = flag.String("cert", "", "ssl certificate file path")
 var keyPath = flag.String("key", "", "ssl key file path")
 var uuid = flag.String("uuid", "b4e00216-3ac3-4410-97a1-534858bedda8", "identity uuid")
 var checkIpUrl = flag.String("check-ip-url", "https://icanhazip.com/", "ssl key file path")
+var interval = flag.Int("interval", 5, "update interval time, unit: seconds")
 
 var config tls.Config
 var serverURI string
@@ -26,6 +28,10 @@ var serverURI string
 func main() {
 
 	flag.Parse()
+
+	var sleepInterval time.Duration
+	sleepInterval = time.Duration(rand.Intn(*interval))
+
 
 	// 检查是否提供了必要的参数
 	if *certPath == "" || *keyPath == "" || *uuid == "" {
@@ -56,7 +62,7 @@ func main() {
 		sdata := *uuid + "," + ipAddr
 		log.Printf("\033[1;31;40mWallGuard [client]: my current public ip addr is %v\033[0m\n", ipAddr)
 		sendData(config, serverURI, sdata)
-		time.Sleep(15 * time.Second)
+		time.Sleep(sleepInterval * time.Second)
 	}
 
 }
