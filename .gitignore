@@ -11,6 +11,16 @@
 # Test binary, built with `go test -c`
 *.test
 
+# ssl cert file
+*ssl
+*cert
+*cer
+*.pem
+*.cert
+*.crt
+*.cer
+
+*.key
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
