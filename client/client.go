@@ -62,6 +62,7 @@ func main() {
 		sdata := *uuid + "," + ipAddr
 		log.Printf("\033[1;31;40mWallGuard [client]: my current public ip addr is %v\033[0m\n", ipAddr)
 		sendData(config, serverURI, sdata)
+		log.Printf("\033[1;34;40mWallGuard [client]: time sleep %vs\033[0m\n", *interval)
 		time.Sleep(sleepInterval * time.Second)
 	}
 
@@ -109,6 +110,5 @@ func sendData(tlsConfig tls.Config, serverURI string, data string) {
 	reply := make([]byte, 256)
 	n, err = conn.Read(reply)
 	log.Printf("\033[1;34;40mWallGuard [client]: read %q (%d bytes)\033[0m\n", string(reply[:n]), n)
-	log.Printf("\033[1;34;40mWallGuard [client]: time sleep 15s\033[0m\n")
 
 }
