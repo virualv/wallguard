@@ -18,6 +18,7 @@ var bindIp = flag.String("bind", "0.0.0.0", "bind ip")
 var bindPort = flag.String("port", "28443", "bind port")
 var certPath = flag.String("cert", "", "ssl certificate file path")
 var keyPath = flag.String("key", "", "ssl key file path")
+var clientCaCertPath = flag.String("client-ca-cert", "", "client ca cert file path")
 var cacheDirPath = flag.String("cache-path", "/tmp/wallguard", "ip cache dir path")
 var portRange = flag.String("port-range", "", "whitelist port ranges")
 var help = flag.Bool("help", false, "Show help")
@@ -31,7 +32,7 @@ func main() {
 	}
 
 	// 检查是否提供了必要的参数
-	if *certPath == "" || *keyPath == "" || *portRange == "" {
+	if *certPath == "" || *keyPath == "" || *clientCaCertPath == "" || *portRange == "" {
 		fmt.Println("WallGuard [server]: please check arguments.")
 		flag.Usage()
 		os.Exit(0)
@@ -41,7 +42,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("\033[1;31;40mWallGuard [server]: loadkeys: %s\033[0m\n", err)
 	}
-	config := tls.Config{Certificates: []tls.Certificate{cert}}
+
+	clientCaCertBytes, err := ioutil.ReadFile(*clientCaCertPath)
+	if err != nil {
+		log.Fatalf("\033[1;31;40mWallGuard [server]: Unable to read client cert file\033[0m\n")
+	}
+	clientCertPool := x509.NewCertPool()
+	ok := clientCertPool.AppendCertsFromPEM(clientCaCertBytes)
+	if !ok {
+		log.Fatalf("\033[1;31;40mWallGuard [server]: failed to parse client certificate\033[0m\n")
+	}
+	config := tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    clientCertPool,
+	}
 	config.Rand = rand.Reader
 	service := *bindIp + ":" + *bindPort
 	listener, err := tls.Listen("tcp", service, &config)
@@ -79,9 +94,7 @@ func handleClient(conn net.Conn, portRange string) {
 	log.Print("WallGuard [server]: conn: waiting")
 	n, err := conn.Read(buf)
 	if err != nil {
-		if err != nil {
-			log.Printf("\033[1;31;40mWallGuard [server]: conn: read: %s\033[0m\n", err)
-		}
+		log.Printf("\033[1;31;40mWallGuard [server]: conn: read: %s\033[0m\n", err)
 		return
 	}
 	log.Printf("WallGuard [server]: conn: rev data: %q", string(buf[:n]))

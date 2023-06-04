@@ -4,10 +4,9 @@ import (
     "io/ioutil"
 	"net/http"
 	"crypto/tls"
-	// "crypto/x509"
+	"crypto/x509"
 	"strings"
 	"flag"
-	"math/rand"
 	"time"
 	"log"
 	"io"
@@ -16,28 +15,31 @@ import (
 
 var serverIp = flag.String("ip", "0.0.0.0", "server ip")
 var serverPort = flag.String("port", "2096", "server port")
+var sni = flag.String("sni", "", "server port")
+var skipVerify = flag.Bool("skip-verify", false, "skip server cert verify")
 var certPath = flag.String("cert", "", "ssl certificate file path")
 var keyPath = flag.String("key", "", "ssl key file path")
 var uuid = flag.String("uuid", "b4e00216-3ac3-4410-97a1-534858bedda8", "identity uuid")
 var checkIpUrl = flag.String("check-ip-url", "https://icanhazip.com/", "ssl key file path")
-var interval = flag.Int("interval", 5, "update interval time, unit: seconds")
+var intervalTime = flag.String("interval", "180s", "update interval time, unit: \"ns\", \"us\" (or \"µs\"), \"ms\", \"s\", \"m\", \"h\"")
+var help = flag.Bool("help", false, "Show help")
 
 var config tls.Config
 var serverURI string
 
 func main() {
-
 	flag.Parse()
-
 	var sleepInterval time.Duration
-	sleepInterval = time.Duration(rand.Intn(*interval))
-
 
 	// 检查是否提供了必要的参数
 	if *certPath == "" || *keyPath == "" || *uuid == "" {
-		log.Println("\033[1;31;40mWallGuard [client]: please check arguments.\033[0m\n")
+		log.Printf("\033[1;31;40mWallGuard [client]: please check arguments.\033[0m\n")
 		flag.Usage()
 		os.Exit(0)
+	}
+
+	if *sni == ""  {
+		log.Printf("\033[1;34;40mWallGuard [warning]: not set sni.\033[0m\n")
 	}
 
 	tr := &http.Transport{
@@ -49,7 +51,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("\033[1;31;40mWallGuard [client]: loadkeys: %s\033[0m\n", err)
 	}
-	config = tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true}
+	sleepInterval,err = time.ParseDuration(*intervalTime)
+	if err != nil {
+		panic("\033[1;31;40mWallGuard [client]: parse interval error\033[0m\n")
+	}
+	certBytes, err := ioutil.ReadFile(*certPath)
+	if err != nil {
+		panic("Unable to read cert.pem")
+	}
+	clientCertPool := x509.NewCertPool()
+	ok := clientCertPool.AppendCertsFromPEM(certBytes)
+	if !ok {
+		panic("failed to parse root certificate")
+	}
+
+	config = tls.Config{
+		RootCAs:            clientCertPool,
+		Certificates:       []tls.Certificate{cert},
+		ServerName:			*sni,
+		InsecureSkipVerify: *skipVerify,
+	}
 	serverURI = *serverIp + ":" + *serverPort
 	log.Printf("\033[1;34;40mWallGuard [client]: uuid: %v\033[0m\n", *uuid)
 	for {
@@ -62,8 +83,8 @@ func main() {
 		sdata := *uuid + "," + ipAddr
 		log.Printf("\033[1;34;40mWallGuard [client]: my current public ip addr is %v\033[0m\n", ipAddr)
 		sendData(config, serverURI, sdata)
-		log.Printf("\033[1;34;40mWallGuard [client]: time sleep %vs\033[0m\n", *interval)
-		time.Sleep(sleepInterval * time.Second)
+		log.Printf("\033[1;34;40mWallGuard [client]: time sleep %v\033[0m\n", *intervalTime)
+		time.Sleep(sleepInterval)
 	}
 
 }
@@ -96,10 +117,6 @@ func sendData(tlsConfig tls.Config, serverURI string, data string) {
 	log.Printf("\033[1;32;40mWallGuard [client]: connected to: %v\033[0m\n", conn.RemoteAddr())
 
 	state := conn.ConnectionState()
-	// for _, v := range state.PeerCertificates {
-	// 	log.Println(x509.MarshalPKIXPublicKey(v.PublicKey))
-	// 	log.Println(v.Subject)
-	// }
 	log.Printf("\033[1;32;40mWallGuard [client]: handshake: %v\033[0m\n", state.HandshakeComplete)
 	log.Printf("\033[1;32;40mWallGuard [client]: mutual: %v\033[0m\n", state.NegotiatedProtocolIsMutual)
 
@@ -109,6 +126,13 @@ func sendData(tlsConfig tls.Config, serverURI string, data string) {
 	}
 	reply := make([]byte, 256)
 	n, err = conn.Read(reply)
+	if err != nil {
+		log.Fatalf("\033[1;31;40mWallGuard [client]: read: %s\033[0m\n", err)
+	}
+	if n == 0 {
+		log.Fatalf("\033[1;31;40mWallGuard [client]: send failed: %s\033[0m\n")
+		return
+	}
 	log.Printf("\033[1;34;40mWallGuard [client]: read %q (%d bytes)\033[0m\n", string(reply[:n]), n)
 
 }
