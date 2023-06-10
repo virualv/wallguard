@@ -1,65 +1,78 @@
 package main
 
 import (
-	"github.com/coreos/go-iptables/iptables"
-	"io/ioutil"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"strings"
-	"fmt"
-	"os"
+	"flag"
+	"io/ioutil"
 	"log"
 	"net"
-	"flag"
+	"os"
+	"strconv"
+	"strings"
+	"github.com/coreos/go-iptables/iptables"
+	"gopkg.in/yaml.v3"
 )
 
-var bindIp = flag.String("bind", "0.0.0.0", "bind ip")
-var bindPort = flag.String("port", "28443", "bind port")
-var certPath = flag.String("cert", "", "ssl certificate file path")
-var keyPath = flag.String("key", "", "ssl key file path")
-var clientCaCertPath = flag.String("client-ca-cert", "", "client ca cert file path")
-var cacheDirPath = flag.String("cache-path", "/tmp/wallguard", "ip cache dir path")
-var portRange = flag.String("port-range", "", "whitelist port ranges")
-var help = flag.Bool("help", false, "Show help")
+type Config struct {
+	Server struct {
+		Host string `yaml:"bind"`
+		Port int    `yaml:"port"`
+		Ssl  struct {
+			CertPath         string `yaml:"cert_path"`
+			KeyPath          string `yaml:"key_path"`
+			ClientCaCertPath string `yaml:"client_ca_path"`
+		} `yaml:"ssl"`
+		CacheDir  string `yaml:"cache_dir"`
+		PortRange string `yaml:"open_ports"`
+	} `yaml:"server"`
+}
+
+var configPath = flag.String("c", "config.yaml", "bind ip")
+var help = flag.Bool("h", false, "Show help")
 
 func main() {
+	var config Config
+	var host string
+	var port int
+	var sslCertPath string
+	var sslKeyPath string
+	var sslClientCaCertPath string
+	var cacheDir string
+	var openPortRange string
+
 	flag.Parse()
-
-	if *help {
+	// check args
+	if *configPath == "" || *help {
 		flag.Usage()
 		os.Exit(0)
 	}
-
-	// 检查是否提供了必要的参数
-	if *certPath == "" || *keyPath == "" || *clientCaCertPath == "" || *portRange == "" {
-		fmt.Println("WallGuard [server]: please check arguments.")
-		flag.Usage()
-		os.Exit(0)
-	}
-
-	cert, err := tls.LoadX509KeyPair(*certPath, *keyPath)
+	// parse config file
+	data, err := ioutil.ReadFile(*configPath)
+	err = yaml.Unmarshal(data, &config)
 	if err != nil {
-		log.Fatalf("\033[1;31;40mWallGuard [server]: loadkeys: %s\033[0m\n", err)
+		log.Fatalf("\033[1;31;40mWallGuard [server]: please check config path.\033[0m\n")
+		return
+	}
+	// read config item
+	host = config.Server.Host
+	port = config.Server.Port
+	sslCertPath = config.Server.Ssl.CertPath
+	sslKeyPath = config.Server.Ssl.KeyPath
+	sslClientCaCertPath = config.Server.Ssl.ClientCaCertPath
+	cacheDir = config.Server.CacheDir
+	openPortRange = config.Server.PortRange
+
+	if host == "" || port == 0 || sslCertPath == "" || sslKeyPath == "" || sslClientCaCertPath == "" || cacheDir == "" || openPortRange == "" {
+		log.Fatalf("\033[1;31;40mWallGuard [server]: please check config items.\033[0m\n")
+		os.Exit(-1)
 	}
 
-	clientCaCertBytes, err := ioutil.ReadFile(*clientCaCertPath)
-	if err != nil {
-		log.Fatalf("\033[1;31;40mWallGuard [server]: Unable to read client cert file\033[0m\n")
-	}
-	clientCertPool := x509.NewCertPool()
-	ok := clientCertPool.AppendCertsFromPEM(clientCaCertBytes)
-	if !ok {
-		log.Fatalf("\033[1;31;40mWallGuard [server]: failed to parse client certificate\033[0m\n")
-	}
-	config := tls.Config{
-		Certificates: []tls.Certificate{cert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    clientCertPool,
-	}
-	config.Rand = rand.Reader
-	service := *bindIp + ":" + *bindPort
-	listener, err := tls.Listen("tcp", service, &config)
+	service := host + ":" + strconv.Itoa(port)
+	tlsConfig := loadSSL(sslCertPath, sslKeyPath, sslClientCaCertPath)
+
+	listener, err := tls.Listen("tcp", service, &tlsConfig)
 	if err != nil {
 		log.Fatalf("WallGuard [server]: listen: %s", err)
 		return
@@ -81,11 +94,39 @@ func main() {
 				log.Print(x509.MarshalPKIXPublicKey(v.PublicKey))
 			}
 		}
-		handleClient(conn, *portRange)
+		handleClient(conn, cacheDir, openPortRange)
 	}
 }
 
-func handleClient(conn net.Conn, portRange string) {
+// load ssl ceritificate and key
+func loadSSL(certPath string, keyPath string, clientCaCertPath string) tls.Config {
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		log.Fatalf("\033[1;31;40mWallGuard [server]: loadkeys: %s\033[0m\n", err)
+	}
+
+	clientCaCertBytes, err := ioutil.ReadFile(clientCaCertPath)
+	if err != nil {
+		log.Fatalf("\033[1;31;40mWallGuard [server]: Unable to read client cert file\033[0m\n")
+		os.Exit(-3)
+	}
+	clientCertPool := x509.NewCertPool()
+	ok := clientCertPool.AppendCertsFromPEM(clientCaCertBytes)
+	if !ok {
+		log.Fatalf("\033[1;31;40mWallGuard [server]: failed to parse client certificate\033[0m\n")
+		os.Exit(-3)
+	}
+	config := tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    clientCertPool,
+	}
+	config.Rand = rand.Reader
+	return config
+}
+
+// handle client request
+func handleClient(conn net.Conn, cacheDir string, portRange string) {
 	defer conn.Close()
 	buf := make([]byte, 512)
 	var ipAddr string
@@ -111,20 +152,21 @@ func handleClient(conn net.Conn, portRange string) {
 		log.Printf("WallGuard [server]: write: %s", err)
 		return
 	}
-	handleFirewall(ipAddr, uuid, portRange)
+	handleFirewall(ipAddr, cacheDir, uuid, portRange)
 	log.Println("WallGuard [server]: conn: closed")
 }
 
-func cacheIpInfo(ipAddr string, uuid string) {
-	_,err := os.Stat(*cacheDirPath)
-    if err != nil && os.IsNotExist(err) {
-		err=os.MkdirAll(*cacheDirPath, os.ModePerm)
+// cache client ip info
+func cacheIpInfo(ipAddr string, cacheDir string, uuid string) {
+	_, err := os.Stat(cacheDir)
+	if err != nil && os.IsNotExist(err) {
+		err = os.MkdirAll(cacheDir, os.ModePerm)
 		if err != nil {
 			panic(err)
 		}
-    }
-	filePath := *cacheDirPath
-	filePath = filePath + "/"  + uuid
+	}
+
+	filePath := cacheDir + "/" + uuid
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		file, err := os.Create(filePath)
 		if err != nil {
@@ -136,26 +178,26 @@ func cacheIpInfo(ipAddr string, uuid string) {
 
 	err = ioutil.WriteFile(filePath, []byte(ipAddr), 0644)
 	if err != nil {
-        panic(err)
-    }
+		panic(err)
+	}
 }
 
-func readOldIpInfo(uuid string) string {
-	filePath := *cacheDirPath + "/"  + uuid
+// read old client ip info from cache
+func readOldIpInfo(cacheDir string, uuid string) string {
+	filePath := cacheDir + "/" + uuid
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		log.Printf("\033[1;34;40mWallGuard [server]: {%s} is a new client. \033[0m\n", uuid)
 		return ""
 	}
 	oldIpAddr, err := ioutil.ReadFile(filePath)
 	if err != nil {
-	   panic(err)
+		panic(err)
 	}
 	return string(oldIpAddr)
 }
 
-
 // add rule
-func addRule(chain string, ruleSpec []string)  {
+func addRule(chain string, ruleSpec []string) {
 	ipt, err := iptables.New()
 	if err != nil {
 		log.Println("\033[1;31;40mWallGuard [firewall]: Failed to new up an IPtables intance. ERROR: %s\033[0m\n", err)
@@ -174,7 +216,7 @@ func addRule(chain string, ruleSpec []string)  {
 }
 
 // delete rule
-func deleteRule(chain string, ruleSpec []string)  {
+func deleteRule(chain string, ruleSpec []string) {
 	ipt, err := iptables.New()
 	if err != nil {
 		log.Printf("\033[1;31;40mWallGuard [firewall]: Failed to new up an IPtables intance. ERROR: %v\033[0m\n", err)
@@ -192,38 +234,39 @@ func deleteRule(chain string, ruleSpec []string)  {
 	log.Printf("\033[1;32;40mWallGuard [firewall]: Congratulations, successfully deleted '%s'  %v rule\033[0m\n", chain, ruleSpec)
 }
 
-func handleFirewall(ipAddr string, uuid string, portRange string) {
+// handle firewall operation
+func handleFirewall(ipAddr string, cacheDir string, uuid string, portRange string) {
 	var oldIpAddr string
-	oldIpAddr = readOldIpInfo(uuid)
+	oldIpAddr = readOldIpInfo(cacheDir, uuid)
 	if oldIpAddr == ipAddr {
 		log.Printf("\033[1;36;40mWallGuard [server]: user: %v ip: %v no change\033[0m", uuid, ipAddr)
 		return
 	} else {
-		cacheIpInfo(ipAddr, uuid)
+		cacheIpInfo(ipAddr, cacheDir, uuid)
 	}
-	
+
 	// clean old rule
-	deleteTcpRuleSpec := []string{"-s", string(oldIpAddr) + "/32", "-p", "tcp", "-m", "multiport","--dports", string(portRange), "-j", "ACCEPT"}
+	deleteTcpRuleSpec := []string{"-s", string(oldIpAddr) + "/32", "-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "ACCEPT"}
 	deleteRule("INPUT", deleteTcpRuleSpec)
-	deleteUdpRuleSpec := []string{"-s", string(oldIpAddr) + "/32", "-p", "udp", "-m", "multiport","--dports", string(portRange), "-j", "ACCEPT"}
+	deleteUdpRuleSpec := []string{"-s", string(oldIpAddr) + "/32", "-p", "udp", "-m", "multiport", "--dports", string(portRange), "-j", "ACCEPT"}
 	deleteRule("INPUT", deleteUdpRuleSpec)
 
-	deleteBanTcpRuleSpec := []string{"-p", "tcp", "-m", "multiport","--dports", string(portRange), "-j", "DROP"}
+	deleteBanTcpRuleSpec := []string{"-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "DROP"}
 	deleteRule("INPUT", deleteBanTcpRuleSpec)
-	deleteBanUdpRuleSpec := []string{"-p", "tcp", "-m", "multiport","--dports", string(portRange), "-j", "DROP"}
+	deleteBanUdpRuleSpec := []string{"-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "DROP"}
 	deleteRule("INPUT", deleteBanUdpRuleSpec)
 
 	// add new rule
-	addAllowTcpRuleSpec := []string{"-s", string(ipAddr) + "/32", "-p", "tcp", "-m", "multiport","--dports", string(portRange), "-j", "ACCEPT"}
+	addAllowTcpRuleSpec := []string{"-s", string(ipAddr) + "/32", "-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "ACCEPT"}
 	addRule("INPUT", addAllowTcpRuleSpec)
-	addAllowUdpRuleSpec := []string{"-s", string(ipAddr) + "/32", "-p", "udp", "-m", "multiport","--dports", string(portRange), "-j", "ACCEPT"}
+	addAllowUdpRuleSpec := []string{"-s", string(ipAddr) + "/32", "-p", "udp", "-m", "multiport", "--dports", string(portRange), "-j", "ACCEPT"}
 	addRule("INPUT", addAllowUdpRuleSpec)
 
 	// addAllowLoRuleSpec := []string{"-i", "lo", "-j" ,"ACCEPT"}
 	// addRule(ipt, 'INPUT', addAllowLoRuleSpec)
-	addBanTcpRuleSpec := []string{"-p", "tcp", "-m", "multiport","--dports", string(portRange), "-j", "DROP"}
+	addBanTcpRuleSpec := []string{"-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "DROP"}
 	addRule("INPUT", addBanTcpRuleSpec)
-	addBanUdpRuleSpec := []string{"-p", "tcp", "-m", "multiport","--dports", string(portRange), "-j", "DROP"}
+	addBanUdpRuleSpec := []string{"-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "DROP"}
 	addRule("INPUT", addBanUdpRuleSpec)
 	log.Printf("\033[1;32;40mWallGuard [server]: {FIREWALL_RULE_UPDATE} %v already removed, %v have been added\033[0m\n", oldIpAddr, ipAddr)
 }

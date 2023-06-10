@@ -1,0 +1,12 @@
+server:
+    bind: "0.0.0.0"
+    port: 59876
+    ssl:
+        cert_path: "/etc/ssl/server.pem" // server certificate path
+        key_path: "/etc/ssl/server.key" // 
+        client_ca_path: "./ssl/ca.pem"
+    cache_dir: "/tmp/wgd"
+    open_ports: "22,80:90,443"
+    allow_uuids:
+        - "b4e00216-3ac3-4980-97a1-53485uidsbds"
+        
