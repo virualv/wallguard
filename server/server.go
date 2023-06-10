@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
 	"github.com/coreos/go-iptables/iptables"
 	"gopkg.in/yaml.v3"
 )
@@ -24,12 +25,13 @@ type Config struct {
 			KeyPath          string `yaml:"key_path"`
 			ClientCaCertPath string `yaml:"client_ca_path"`
 		} `yaml:"ssl"`
-		CacheDir  string `yaml:"cache_dir"`
-		PortRange string `yaml:"open_ports"`
+		CacheDir   string   `yaml:"cache_dir"`
+		PortRange  string   `yaml:"open_ports"`
+		AllowUUIDs []string `yaml:"allow_uuids"`
 	} `yaml:"server"`
 }
 
-var configPath = flag.String("c", "config.yaml", "bind ip")
+var configPath = flag.String("c", "config.yaml", "config path")
 var help = flag.Bool("h", false, "Show help")
 
 func main() {
@@ -41,6 +43,7 @@ func main() {
 	var sslClientCaCertPath string
 	var cacheDir string
 	var openPortRange string
+	var allowUUIDs []string
 
 	flag.Parse()
 	// check args
@@ -52,7 +55,7 @@ func main() {
 	data, err := ioutil.ReadFile(*configPath)
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
-		log.Fatalf("\033[1;31;40mWallGuard [server]: please check config path.\033[0m\n")
+		log.Fatalf("\033[1;31;40mWallGuard [server]: please check config path. %v\033[0m\n", err)
 		return
 	}
 	// read config item
@@ -63,8 +66,9 @@ func main() {
 	sslClientCaCertPath = config.Server.Ssl.ClientCaCertPath
 	cacheDir = config.Server.CacheDir
 	openPortRange = config.Server.PortRange
+	allowUUIDs = config.Server.AllowUUIDs
 
-	if host == "" || port == 0 || sslCertPath == "" || sslKeyPath == "" || sslClientCaCertPath == "" || cacheDir == "" || openPortRange == "" {
+	if host == "" || port == 0 || sslCertPath == "" || sslKeyPath == "" || sslClientCaCertPath == "" || cacheDir == "" || openPortRange == "" || len(allowUUIDs) == 0 {
 		log.Fatalf("\033[1;31;40mWallGuard [server]: please check config items.\033[0m\n")
 		os.Exit(-1)
 	}
@@ -94,7 +98,7 @@ func main() {
 				log.Print(x509.MarshalPKIXPublicKey(v.PublicKey))
 			}
 		}
-		handleClient(conn, cacheDir, openPortRange)
+		handleClient(conn, cacheDir, openPortRange, allowUUIDs)
 	}
 }
 
@@ -126,7 +130,7 @@ func loadSSL(certPath string, keyPath string, clientCaCertPath string) tls.Confi
 }
 
 // handle client request
-func handleClient(conn net.Conn, cacheDir string, portRange string) {
+func handleClient(conn net.Conn, cacheDir string, portRange string, allowUUIDs []string) {
 	defer conn.Close()
 	buf := make([]byte, 512)
 	var ipAddr string
@@ -146,6 +150,13 @@ func handleClient(conn net.Conn, cacheDir string, portRange string) {
 	revSlice := strings.Split(revData, ",")
 	uuid = revSlice[0]
 	ipAddr = revSlice[1]
+
+	for _, allowUUID := range allowUUIDs {
+		if allowUUID != uuid {
+			log.Fatalf("\033[1;33;40mWallGuard [server]: {warnning} the uuid [%v] for this client is invalid \033[0m\n", uuid)
+		}
+	}
+
 	log.Printf("WallGuard [server]: conn: wrote %d bytes", n)
 
 	if err != nil {
