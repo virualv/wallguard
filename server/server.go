@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -143,26 +144,28 @@ func handleClient(conn net.Conn, cacheDir string, portRange string, allowUUIDs [
 		return
 	}
 	log.Printf("WallGuard [server]: conn: rev data: %q", string(buf[:n]))
-	n, err = conn.Write(buf[:n])
 	revData := string(buf[:n])
 	revData = strings.Replace(revData, " ", "", -1)
 	revData = strings.Replace(revData, "\n", "", -1)
 	revSlice := strings.Split(revData, ",")
 	uuid = revSlice[0]
 	ipAddr = revSlice[1]
-
 	for _, allowUUID := range allowUUIDs {
 		if allowUUID != uuid {
-			log.Fatalf("\033[1;33;40mWallGuard [server]: {warnning} the uuid [%v] for this client is invalid \033[0m\n", uuid)
+			log.Printf("\033[1;33;40mWallGuard [server]: {warnning} the uuid [%v] for this client is invalid \033[0m\n", uuid)
+			n, err = io.WriteString(conn, "client uuid: "+uuid+" is blocked by server")
+			if err != nil {
+				log.Printf("WallGuard [server]: failed to send msg: %s", err)
+			}
+			return
 		}
 	}
-
-	log.Printf("WallGuard [server]: conn: wrote %d bytes", n)
-
+	n, err = conn.Write(buf[:n])
 	if err != nil {
 		log.Printf("WallGuard [server]: write: %s", err)
 		return
 	}
+	log.Printf("WallGuard [server]: conn: wrote %d bytes", n)
 	handleFirewall(ipAddr, cacheDir, uuid, portRange)
 	log.Println("WallGuard [server]: conn: closed")
 }
@@ -187,7 +190,7 @@ func cacheIpInfo(ipAddr string, cacheDir string, uuid string) {
 		defer file.Close()
 	}
 
-	err = ioutil.WriteFile(filePath, []byte(ipAddr), 0644)
+	err = ioutil.WriteFile(filePath, []byte(ipAddr), 0600)
 	if err != nil {
 		panic(err)
 	}
@@ -211,7 +214,7 @@ func readOldIpInfo(cacheDir string, uuid string) string {
 func addRule(chain string, ruleSpec []string) {
 	ipt, err := iptables.New()
 	if err != nil {
-		log.Println("\033[1;31;40mWallGuard [firewall]: Failed to new up an IPtables intance. ERROR: %s\033[0m\n", err)
+		log.Println("\033[1;31;40mWallGuard [firewall]: Failed to new up an iptables intance. ERROR: %s\033[0m\n", err)
 		return
 	}
 	if _, err = ipt.List("filter", chain); err != nil {
@@ -238,9 +241,14 @@ func deleteRule(chain string, ruleSpec []string) {
 		ipt = nil
 	}
 	err = ipt.DeleteIfExists("filter", chain, ruleSpec...)
+	e, ok := err.(*iptables.Error)
 	if err != nil {
-		log.Printf("\033[1;31;40mWallGuard [firewall]: Failed to delete '%v' from %v . ERROR: %v\033[0m\n", ruleSpec, chain, err)
-		return
+		if ok && e.IsNotExist() {
+			log.Printf("\033[1;32;40mWallGuard [firewall]: this is a new firewall rule. \033[0m\n")
+			return
+		} else {
+			log.Printf("\033[1;31;40mWallGuard [firewall]: Failed to delete '%v' from %v . ERROR: %v\033[0m\n", ruleSpec, chain, err)
+		}
 	}
 	log.Printf("\033[1;32;40mWallGuard [firewall]: Congratulations, successfully deleted '%s'  %v rule\033[0m\n", chain, ruleSpec)
 }
@@ -257,10 +265,12 @@ func handleFirewall(ipAddr string, cacheDir string, uuid string, portRange strin
 	}
 
 	// clean old rule
-	deleteTcpRuleSpec := []string{"-s", string(oldIpAddr) + "/32", "-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "ACCEPT"}
-	deleteRule("INPUT", deleteTcpRuleSpec)
-	deleteUdpRuleSpec := []string{"-s", string(oldIpAddr) + "/32", "-p", "udp", "-m", "multiport", "--dports", string(portRange), "-j", "ACCEPT"}
-	deleteRule("INPUT", deleteUdpRuleSpec)
+	if oldIpAddr != "" {
+		deleteTcpRuleSpec := []string{"-s", string(oldIpAddr) + "/32", "-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "ACCEPT"}
+		deleteRule("INPUT", deleteTcpRuleSpec)
+		deleteUdpRuleSpec := []string{"-s", string(oldIpAddr) + "/32", "-p", "udp", "-m", "multiport", "--dports", string(portRange), "-j", "ACCEPT"}
+		deleteRule("INPUT", deleteUdpRuleSpec)
+	}
 
 	deleteBanTcpRuleSpec := []string{"-p", "tcp", "-m", "multiport", "--dports", string(portRange), "-j", "DROP"}
 	deleteRule("INPUT", deleteBanTcpRuleSpec)

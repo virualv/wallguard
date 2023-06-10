@@ -1,16 +1,16 @@
 package main
 
 import (
-    "io/ioutil"
-	"net/http"
 	"crypto/tls"
 	"crypto/x509"
-	"strings"
 	"flag"
-	"time"
-	"log"
 	"io"
+	"io/ioutil"
+	"log"
+	"net/http"
 	"os"
+	"strings"
+	"time"
 )
 
 var serverIp = flag.String("ip", "0.0.0.0", "server ip")
@@ -38,20 +38,20 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *sni == ""  {
+	if *sni == "" {
 		log.Printf("\033[1;34;40mWallGuard [warning]: not set sni.\033[0m\n")
 	}
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-    }
+	}
 	client := &http.Client{Transport: tr}
 
 	cert, err := tls.LoadX509KeyPair(*certPath, *keyPath)
 	if err != nil {
 		log.Fatalf("\033[1;31;40mWallGuard [client]: loadkeys: %s\033[0m\n", err)
 	}
-	sleepInterval,err = time.ParseDuration(*intervalTime)
+	sleepInterval, err = time.ParseDuration(*intervalTime)
 	if err != nil {
 		panic("\033[1;31;40mWallGuard [client]: parse interval error\033[0m\n")
 	}
@@ -68,7 +68,7 @@ func main() {
 	config = tls.Config{
 		RootCAs:            clientCertPool,
 		Certificates:       []tls.Certificate{cert},
-		ServerName:			*sni,
+		ServerName:         *sni,
 		InsecureSkipVerify: *skipVerify,
 	}
 	serverURI = *serverIp + ":" + *serverPort
@@ -90,18 +90,18 @@ func main() {
 }
 
 func queryLocalIp(client *http.Client) string {
-    resp, err := client.Get(*checkIpUrl)
+	resp, err := client.Get(*checkIpUrl)
 
-    if err != nil {
-        log.Printf("\033[1;31;40mWallGuard [client]: [queryPublicIP] error: %v\033[0m\n", err)
-        return ""
-    }
-    defer resp.Body.Close()
-    body, err := ioutil.ReadAll(resp.Body)
-    if err != nil {
-        log.Printf("\033[1;31;40mWallGuard [client]: [queryPublicIP] error: %v\033[0m\n", err)
-        return ""
-    }
+	if err != nil {
+		log.Printf("\033[1;31;40mWallGuard [client]: [queryPublicIP] error: %v\033[0m\n", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("\033[1;31;40mWallGuard [client]: [queryPublicIP] error: %v\033[0m\n", err)
+		return ""
+	}
 	queryData := string(body)
 	queryData = strings.Replace(queryData, " ", "", -1)
 	queryData = strings.Replace(queryData, "\n", "", -1)
@@ -133,6 +133,9 @@ func sendData(tlsConfig tls.Config, serverURI string, data string) {
 		log.Fatalf("\033[1;31;40mWallGuard [client]: send failed: %s\033[0m\n")
 		return
 	}
-	log.Printf("\033[1;34;40mWallGuard [client]: read %q (%d bytes)\033[0m\n", string(reply[:n]), n)
-
+	if strings.Contains(revData, "World") {
+		log.Printf("\033[1;31;40mWallGuard [client]: %q \033[0m\n", string(reply[:n]), n)
+	} else {
+		log.Printf("\033[1;34;40mWallGuard [client]: read %q (%d bytes)\033[0m\n", string(reply[:n]), n)
+	}
 }
