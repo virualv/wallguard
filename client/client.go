@@ -5,40 +5,88 @@ import (
 	"crypto/x509"
 	"flag"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
-var serverIp = flag.String("ip", "0.0.0.0", "server ip")
-var serverPort = flag.String("port", "2096", "server port")
-var sni = flag.String("sni", "", "server port")
-var skipVerify = flag.Bool("skip-verify", false, "skip server cert verify")
-var certPath = flag.String("cert", "", "ssl certificate file path")
-var keyPath = flag.String("key", "", "ssl key file path")
-var uuid = flag.String("uuid", "b4e00216-3ac3-4410-97a1-534858bedda8", "identity uuid")
-var checkIpUrl = flag.String("check-ip-url", "https://icanhazip.com/", "ssl key file path")
-var intervalTime = flag.String("interval", "180s", "update interval time, unit: \"ns\", \"us\" (or \"µs\"), \"ms\", \"s\", \"m\", \"h\"")
-var help = flag.Bool("help", false, "Show help")
+// var serverIp = flag.String("ip", "0.0.0.0", "server ip")
+// var serverPort = flag.String("port", "2096", "server port")
+// var sni = flag.String("sni", "", "server port")
+// var skipVerify = flag.Bool("skip-verify", false, "skip server cert verify")
+// var certPath = flag.String("cert", "", "ssl certificate file path")
+// var keyPath = flag.String("key", "", "ssl key file path")
+// var uuid = flag.String("uuid", "b4e00216-3ac3-4410-97a1-534858bedda8", "identity uuid")
+// var checkIpUrl = flag.String("check-ip-url", "https://icanhazip.com/", "ssl key file path")
+// var intervalTime = flag.String("interval", "180s", "update interval time, unit: \"ns\", \"us\" (or \"µs\"), \"ms\", \"s\", \"m\", \"h\"")
+
+type Config struct {
+	Server struct {
+		Ip   string `yaml:"bind"`
+		Port int    `yaml:"port"`
+
+		CacheDir     string `yaml:"cache_dir"`
+		IntervalTime string `yaml:"open_ports"`
+	} `yaml:"server"`
+	Ssl struct {
+		Sni        string `yaml:"sni"`
+		CertPath   string `yaml:"cert_path"`
+		KeyPath    string `yaml:"key_path"`
+		skipVerify bool   `yaml:"skip_verify"`
+	} `yaml:"ssl"`
+	User struct {
+		Uuid string `yaml:"uuid"`
+	} `yaml:"user"`
+	CheckIpUrl   string `yaml:"check_ip_url"`
+	IntervalTime string `yaml:"interval"`
+}
+
+var configPath = flag.String("c", "config.yaml", "config path")
+var help = flag.Bool("h", false, "Show help")
 
 var config tls.Config
 var serverURI string
 
 func main() {
+	var serverIp string
+	var serverPort string
+	var sni string
+	var skipVerify bool
+	var certPath string
+	var keyPath string
+	var uuid string
+	var checkIpUrl string
+	var intervalTime string
+
 	flag.Parse()
+	// check args
+	if *configPath == "" || *help {
+		flag.Usage()
+		os.Exit(0)
+	}
+	// parse config file
+	data, err := os.ReadFile(*configPath)
+	err = yaml.Unmarshal(data, &config)
+	if err != nil {
+		log.Fatalf("\033[1;31;40mWallGuard [server]: please check config path. %v\033[0m\n", err)
+		return
+	}
+	// read config item
+
 	var sleepInterval time.Duration
 
 	// 检查是否提供了必要的参数
-	if *certPath == "" || *keyPath == "" || *uuid == "" {
+	if certPath == "" || keyPath == "" || uuid == "" {
 		log.Printf("\033[1;31;40mWallGuard [client]: please check arguments.\033[0m\n")
 		flag.Usage()
 		os.Exit(0)
 	}
 
-	if *sni == "" {
+	if sni == "" {
 		log.Printf("\033[1;34;40mWallGuard [warning]: not set sni.\033[0m\n")
 	}
 
@@ -47,15 +95,15 @@ func main() {
 	}
 	client := &http.Client{Transport: tr}
 
-	cert, err := tls.LoadX509KeyPair(*certPath, *keyPath)
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
 		log.Fatalf("\033[1;31;40mWallGuard [client]: loadkeys: %s\033[0m\n", err)
 	}
-	sleepInterval, err = time.ParseDuration(*intervalTime)
+	sleepInterval, err = time.ParseDuration(intervalTime)
 	if err != nil {
 		panic("\033[1;31;40mWallGuard [client]: parse interval error\033[0m\n")
 	}
-	certBytes, err := ioutil.ReadFile(*certPath)
+	certBytes, err := os.ReadFile(certPath)
 	if err != nil {
 		panic("Unable to read cert.pem")
 	}
@@ -68,36 +116,36 @@ func main() {
 	config = tls.Config{
 		RootCAs:            clientCertPool,
 		Certificates:       []tls.Certificate{cert},
-		ServerName:         *sni,
-		InsecureSkipVerify: *skipVerify,
+		ServerName:         sni,
+		InsecureSkipVerify: skipVerify,
 	}
-	serverURI = *serverIp + ":" + *serverPort
-	log.Printf("\033[1;34;40mWallGuard [client]: uuid: %v\033[0m\n", *uuid)
+	serverURI = serverIp + ":" + serverPort
+	log.Printf("\033[1;34;40mWallGuard [client]: uuid: %v\033[0m\n", uuid)
 	for {
 		log.Println("WallGuard [client]: Query my public ip address")
-		ipAddr := queryLocalIp(client)
+		ipAddr := queryLocalIp(client, checkIpUrl)
 		if ipAddr == "" {
 			log.Fatalf("\033[1;31;40mWallGuard [client]: query public ip fail, please check '-check-ip-url' argument\033[0m\n")
 			os.Exit(-1)
 		}
-		sdata := *uuid + "," + ipAddr
+		sdata := uuid + "," + ipAddr
 		log.Printf("\033[1;34;40mWallGuard [client]: my current public ip addr is %v\033[0m\n", ipAddr)
 		sendData(config, serverURI, sdata)
-		log.Printf("\033[1;34;40mWallGuard [client]: time sleep %v\033[0m\n", *intervalTime)
+		log.Printf("\033[1;34;40mWallGuard [client]: time sleep %v\033[0m\n", intervalTime)
 		time.Sleep(sleepInterval)
 	}
 
 }
 
-func queryLocalIp(client *http.Client) string {
-	resp, err := client.Get(*checkIpUrl)
+func queryLocalIp(client *http.Client, checkIpUrl string) string {
+	resp, err := client.Get(checkIpUrl)
 
 	if err != nil {
 		log.Printf("\033[1;31;40mWallGuard [client]: [queryPublicIP] error: %v\033[0m\n", err)
 		return ""
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("\033[1;31;40mWallGuard [client]: [queryPublicIP] error: %v\033[0m\n", err)
 		return ""
@@ -133,6 +181,7 @@ func sendData(tlsConfig tls.Config, serverURI string, data string) {
 		log.Fatalf("\033[1;31;40mWallGuard [client]: send failed: %s\033[0m\n")
 		return
 	}
+	revData := string(reply[:n])
 	if strings.Contains(revData, "World") {
 		log.Printf("\033[1;31;40mWallGuard [client]: %q \033[0m\n", string(reply[:n]), n)
 	} else {

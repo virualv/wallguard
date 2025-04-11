@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"flag"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -53,7 +52,7 @@ func main() {
 		os.Exit(0)
 	}
 	// parse config file
-	data, err := ioutil.ReadFile(*configPath)
+	data, err := os.ReadFile(*configPath)
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
 		log.Fatalf("\033[1;31;40mWallGuard [server]: please check config path. %v\033[0m\n", err)
@@ -110,7 +109,7 @@ func loadSSL(certPath string, keyPath string, clientCaCertPath string) tls.Confi
 		log.Fatalf("\033[1;31;40mWallGuard [server]: loadkeys: %s\033[0m\n", err)
 	}
 
-	clientCaCertBytes, err := ioutil.ReadFile(clientCaCertPath)
+	clientCaCertBytes, err := os.ReadFile(clientCaCertPath)
 	if err != nil {
 		log.Fatalf("\033[1;31;40mWallGuard [server]: Unable to read client cert file\033[0m\n")
 		os.Exit(-3)
@@ -190,7 +189,7 @@ func cacheIpInfo(ipAddr string, cacheDir string, uuid string) {
 		defer file.Close()
 	}
 
-	err = ioutil.WriteFile(filePath, []byte(ipAddr), 0600)
+	err = os.WriteFile(filePath, []byte(ipAddr), 0600)
 	if err != nil {
 		panic(err)
 	}
@@ -203,7 +202,7 @@ func readOldIpInfo(cacheDir string, uuid string) string {
 		log.Printf("\033[1;34;40mWallGuard [server]: {%s} is a new client. \033[0m\n", uuid)
 		return ""
 	}
-	oldIpAddr, err := ioutil.ReadFile(filePath)
+	oldIpAddr, err := os.ReadFile(filePath)
 	if err != nil {
 		panic(err)
 	}
