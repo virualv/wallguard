@@ -1,0 +1,38 @@
+# WallGuard 配置文件示例
+# 通过 mode 字段指定运行模式: "server" 或 "client"
+
+# ============================================
+# 服务端配置示例 (mode: server)
+# ============================================
+mode: "server"
+
+server:
+  bind: "0.0.0.0"                  # 监听地址
+  port: 59876                       # 监听端口
+  ssl:
+    cert_path: "/etc/ssl/server.pem"      # 服务器证书路径
+    key_path: "/etc/ssl/server.key"       # 服务器私钥路径
+    client_ca_path: "/etc/ssl/ca.pem"     # 客户端CA证书路径
+  cache_dir: "/tmp/wallguard"       # IP缓存目录
+  open_ports: "22,80:90,443"        # 开放端口范围
+  allow_uuids:                      # 允许的客户端UUID列表
+    - "b4e00216-3ac3-4980-97a1-534858bedda8"
+  firewall:
+    backend: "auto"                 # 防火墙后端: "iptables", "firewalld", "ufw", "auto"
+
+# ============================================
+# 客户端配置示例 (mode: client)  
+# ============================================
+# mode: "client"
+# 
+# client:
+#   server_ip: "127.0.0.1"          # 服务器IP地址
+#   server_port: "59876"            # 服务器端口
+#   ssl:
+#     sni: "example.com"            # SNI (可选)
+#     cert_path: "./client.crt"     # 客户端证书路径
+#     key_path: "./client.key"      # 客户端私钥路径
+#     skip_verify: false            # 是否跳过服务器证书验证
+#   uuid: "b4e00216-3ac3-4980-97a1-534858bedda8"  # 客户端UUID
+#   check_ip_url: "https://icanhazip.com/"        # 公网IP查询地址
+#   interval: "180s"                # 更新间隔 (支持: ns, us, ms, s, m, h)
